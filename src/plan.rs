@@ -71,6 +71,18 @@ impl<T: FftNum> FftPlanner<T> {
         }
     }
 
+    pub fn new_thrifty() -> Self {
+        if let Ok(avx_planner) = FftPlannerAvx::new() {
+            Self {
+                chosen_planner: ChosenFftPlanner::Avx(avx_planner),
+            }
+        } else {
+            Self {
+                chosen_planner: ChosenFftPlanner::Scalar(FftPlannerScalar::new_thrifty()),
+            }
+        }
+    }
+
     /// Returns a `Fft` instance which computes FFTs of size `len`.
     ///
     /// If the provided `direction` is `FftDirection::Forward`, the returned instance will compute forward FFTs. If it's `FftDirection::Inverse`, it will compute inverse FFTs.
@@ -227,6 +239,7 @@ impl Recipe {
 pub struct FftPlannerScalar<T: FftNum> {
     algorithm_cache: FftCache<T>,
     recipe_cache: HashMap<usize, Rc<Recipe>>,
+    allow_bluestein: bool
 }
 
 impl<T: FftNum> FftPlannerScalar<T> {
@@ -235,6 +248,15 @@ impl<T: FftNum> FftPlannerScalar<T> {
         Self {
             algorithm_cache: FftCache::new(),
             recipe_cache: HashMap::new(),
+            allow_bluestein: true,
+        }
+    }
+
+    pub fn new_thrifty() -> Self {
+        Self {
+            algorithm_cache: FftCache::new(),
+            recipe_cache: HashMap::new(),
+            allow_bluestein: false,
         }
     }
 
@@ -444,7 +466,7 @@ impl<T: FftNum> FftPlannerScalar<T> {
         if raders_factors
             .get_other_factors()
             .iter()
-            .any(|val| val.value > MAX_RADER_PRIME_FACTOR)
+            .any(|val| val.value > MAX_RADER_PRIME_FACTOR) && self.allow_bluestein
         {
             let inner_fft_len_pow2 = (2 * len - 1).checked_next_power_of_two().unwrap();
             // for long ffts a mixed radix inner fft is faster than a longer radix4
@@ -634,6 +656,18 @@ mod unit_tests {
             assert!(is_raders(&plan), "Expected RadersAlgorithm, got {:?}", plan);
             assert_eq!(plan.len(), *len, "Recipe reports wrong length");
         }
+    }   
+
+    #[test]
+    fn thrifty_planner() {
+        let difficult_prime = 59;
+        let mut planner = FftPlannerScalar::<f64>::new_thrifty();
+        let plan = planner.design_fft_for_len(difficult_prime);
+        assert!(
+            is_raders(&plan),
+            "Expected RadersAlgorithm, got {:?}",
+            plan
+        );
     }
 
     #[test]
